@@ -1,0 +1,17 @@
+[package]
+name = "nuklear-backend-ash"
+version = "0.1.0"
+authors = ["Chehui Chou <deadshot465@gmail.com>"]
+edition = "2018"
+
+[lib]
+name = "nuklear_backend_ash"
+path = "src/lib.rs"
+
+[dependencies]
+ash = ">=0.31.0"
+log = ">=0.3"
+memoffset = ">=0.6.1"
+nuklear-rust = ">=0.6.3"
+shaderc = ">=0.6.2"
+vk-mem = ">=0.2.2"
