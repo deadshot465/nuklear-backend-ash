@@ -1,6 +1,5 @@
 pub(crate) mod common;
 use ash::version::{DeviceV1_0, InstanceV1_0};
-use ash::vk::create_buffer;
 use ash::vk::*;
 use common::*;
 use nuklear::{
@@ -439,6 +438,8 @@ pub struct Drawer {
     command_buffer: CommandBuffer,
     vertex_buffer_size: usize,
     index_buffer_size: usize,
+    textures: Vec<VkTexture>,
+    renderpass: RenderPass,
 }
 
 impl Drawer {
@@ -668,6 +669,67 @@ impl Drawer {
                 .expect("Failed to create graphics pipeline.");
 
             pipeline[0]
+        }
+    }
+
+    fn create_renderpass(device: &ash::Device, color: Option<[f32; 4]>) -> RenderPass {
+        let color_attachment = vec![AttachmentDescription::builder()
+            .format(TEXTURE_FORMAT)
+            .initial_layout(ImageLayout::UNDEFINED)
+            .samples(SampleCountFlags::TYPE_1)
+            .store_op(AttachmentStoreOp::STORE)
+            .stencil_store_op(AttachmentStoreOp::DONT_CARE)
+            .stencil_load_op(AttachmentLoadOp::DONT_CARE)
+            .load_op(if color.is_some() {
+                AttachmentLoadOp::CLEAR
+            } else {
+                AttachmentLoadOp::LOAD
+            })
+            .final_layout(ImageLayout::PRESENT_SRC_KHR)
+            .build()];
+
+        let color_reference = vec![AttachmentReference::builder()
+            .layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .attachment(0)
+            .build()];
+
+        let subpass_description = vec![SubpassDescription::builder()
+            .pipeline_bind_point(PipelineBindPoint::GRAPHICS)
+            .color_attachments(color_reference.as_slice())
+            .build()];
+
+        let mut subpass_dependencies = vec![SubpassDependency::builder()
+            .dst_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .src_access_mask(AccessFlags::MEMORY_READ)
+            .src_subpass(SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(PipelineStageFlags::FRAGMENT_SHADER)
+            .dst_stage_mask(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .dependency_flags(DependencyFlags::BY_REGION)
+            .build()];
+
+        subpass_dependencies.push(
+            SubpassDependency::builder()
+                .dst_access_mask(AccessFlags::MEMORY_READ)
+                .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
+                .src_subpass(0)
+                .dst_subpass(SUBPASS_EXTERNAL)
+                .src_stage_mask(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .dst_stage_mask(PipelineStageFlags::FRAGMENT_SHADER)
+                .dependency_flags(DependencyFlags::BY_REGION)
+                .build(),
+        );
+
+        let renderpass_info = RenderPassCreateInfo::builder()
+            .attachments(color_attachment.as_slice())
+            .subpasses(subpass_description.as_slice())
+            .dependencies(subpass_dependencies.as_slice());
+
+        unsafe {
+            let renderpass = device
+                .create_render_pass(&renderpass_info, None)
+                .expect("Failed to create renderpass for Nuklear.");
+            renderpass
         }
     }
 }
