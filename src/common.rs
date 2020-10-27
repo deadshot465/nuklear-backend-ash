@@ -11,6 +11,7 @@ use vk_mem::{
 pub(crate) struct VkBuffer {
     pub(crate) buffer: Buffer,
     pub(crate) device_memory: DeviceMemory,
+    pub(crate) mapped_memory: *mut std::ffi::c_void,
     pub(crate) allocation: Option<Allocation>,
     pub(crate) allocation_info: Option<AllocationInfo>,
 }
@@ -34,8 +35,9 @@ pub(crate) fn create_buffer<T>(
         let allocation_info = AllocationCreateInfo {
             usage: match usage_flag {
                 BufferUsageFlags::TRANSFER_SRC => MemoryUsage::CpuOnly,
-                x if (x & BufferUsageFlags::VERTEX_BUFFER) != BufferUsageFlags::empty()
-                    || (x & BufferUsageFlags::INDEX_BUFFER) != BufferUsageFlags::empty() =>
+                x if ((x & BufferUsageFlags::VERTEX_BUFFER) != BufferUsageFlags::empty()
+                    || (x & BufferUsageFlags::INDEX_BUFFER) != BufferUsageFlags::empty())
+                    && (x & BufferUsageFlags::TRANSFER_SRC) == BufferUsageFlags::empty() =>
                 {
                     MemoryUsage::GpuOnly
                 }
@@ -74,6 +76,7 @@ pub(crate) fn create_buffer<T>(
             device_memory,
             allocation: Some(allocation),
             allocation_info: Some(allocation_info),
+            mapped_memory: mapped as *mut std::ffi::c_void,
         }
     } else {
         unsafe {
@@ -100,12 +103,12 @@ pub(crate) fn create_buffer<T>(
                 mapped,
                 buffer_size as usize,
             );
-            device.unmap_memory(device_memory);
             VkBuffer {
                 buffer,
                 device_memory,
                 allocation: None,
                 allocation_info: None,
+                mapped_memory: mapped,
             }
         }
     }
@@ -113,11 +116,12 @@ pub(crate) fn create_buffer<T>(
 
 pub(crate) fn create_descriptor_set_layout(
     device: &ash::Device,
+    binding: u32,
     descriptor_type: DescriptorType,
     shader_stage: ShaderStageFlags,
 ) -> DescriptorSetLayout {
     let layout_binding = vec![DescriptorSetLayoutBinding::builder()
-        .binding(0)
+        .binding(binding)
         .descriptor_count(1)
         .descriptor_type(descriptor_type)
         .stage_flags(shader_stage)

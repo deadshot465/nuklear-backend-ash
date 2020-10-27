@@ -6,13 +6,20 @@ use nuklear::{
     Buffer as NkBuffer, Color, CommandBuffer, Context, ConvertConfig, DrawVertexLayoutAttribute,
     DrawVertexLayoutElements, DrawVertexLayoutFormat, Handle, Size, Vec2,
 };
+use shaderc::ShaderKind;
 use std::str::from_utf8;
 use std::sync::Arc;
 use vk_mem::{
     Allocation, AllocationCreateFlags, AllocationCreateInfo, AllocationInfo, Allocator, MemoryUsage,
 };
 
-pub const TEXTURE_FORMAT: Format = Format::B8G8R8A8_UNORM;
+const TEXTURE_FORMAT: Format = Format::B8G8R8A8_UNORM;
+const ORTHO: Ortho = [
+    [2.0f32 / width as f32, 0.0f32, 0.0f32, 0.0f32],
+    [0.0f32, -2.0f32 / height as f32, 0.0f32, 0.0f32],
+    [0.0f32, 0.0f32, -1.0f32, 0.0f32],
+    [-1.0f32, 1.0f32, 0.0f32, 1.0f32],
+];
 
 struct Vertex {
     position: [f32; 2],
@@ -24,7 +31,6 @@ struct Vertex {
 
 struct VkTexture {
     pub(crate) texture: VkImage,
-    pub(crate) sampler: Sampler,
     pub(crate) descriptor_data: VkDescriptorData,
 }
 
@@ -61,16 +67,15 @@ impl VkTexture {
             device.as_ref(),
             height,
             width,
-            allocator.as_ref().cloned(),
+            allocator.clone(),
             instance,
             physical_device,
         );
-        let sampler = Self::create_sampler(device.as_ref());
         let staging_buffer = common::create_buffer(
             device.as_ref(),
             image,
             image.len() as u64,
-            allocator.as_ref().cloned(),
+            allocator.clone(),
             instance,
             physical_device,
             BufferUsageFlags::TRANSFER_SRC,
@@ -87,11 +92,12 @@ impl VkTexture {
         );
         let image_view = Self::create_image_view(device.as_ref(), texture.texture);
         texture.texture_view = image_view;
-        let (descriptor_pool, descriptor_set) = Self::create_descriptor_set(
+        let descriptor_set = Self::create_combined_sampler_descriptor_set(
             device.as_ref(),
             drawer.combined_sampler_layout,
+            drawer.descriptor_pool,
             image_view,
-            sampler,
+            drawer.sampler,
         );
 
         unsafe {
@@ -101,6 +107,7 @@ impl VkTexture {
                     staging_buffer.allocation.as_ref().unwrap(),
                 );
             } else {
+                device.unmap_memory(staging_buffer.device_memory);
                 device.free_memory(staging_buffer.device_memory, None);
                 device.destroy_buffer(staging_buffer.buffer, None);
             }
@@ -108,7 +115,6 @@ impl VkTexture {
 
         VkTexture {
             texture,
-            sampler,
             descriptor_data: VkDescriptorData {
                 descriptor_layout,
                 descriptor_pool,
@@ -233,24 +239,14 @@ impl VkTexture {
         }
     }
 
-    fn create_descriptor_set(
+    fn create_combined_sampler_descriptor_set(
         device: &ash::Device,
         descriptor_set_layout: DescriptorSetLayout,
+        descriptor_pool: DescriptorPool,
         texture_view: ImageView,
         sampler: Sampler,
-    ) -> (DescriptorPool, DescriptorSet) {
-        let pool_size = vec![DescriptorPoolSize::builder()
-            .descriptor_count(1)
-            .ty(DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .build()];
-        let pool_info = DescriptorPoolCreateInfo::builder()
-            .pool_sizes(pool_size.as_slice())
-            .max_sets(1)
-            .build();
+    ) -> DescriptorSet {
         unsafe {
-            let descriptor_pool = device
-                .create_descriptor_pool(&pool_info, None)
-                .expect("Failed to create descriptor pool.");
             let layouts = vec![descriptor_set_layout];
             let allocate_info = DescriptorSetAllocateInfo::builder()
                 .descriptor_pool(descriptor_pool)
@@ -269,13 +265,13 @@ impl VkTexture {
                 .descriptor_type(DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .image_info(image_info.as_slice())
                 .dst_array_element(0)
-                .dst_binding(0)
+                .dst_binding(1)
                 .dst_set(descriptor_sets[0])
                 .build()];
 
             device.update_descriptor_sets(write_descriptor.as_slice(), &[]);
 
-            (descriptor_pool, descriptor_sets[0])
+            descriptor_sets[0]
         }
     }
 
@@ -307,32 +303,6 @@ impl VkTexture {
                 .create_image_view(&image_view_info, None)
                 .expect("Failed to create image view.");
             image_view
-        }
-    }
-
-    fn create_sampler(device: &ash::Device) -> Sampler {
-        let sampler_info = SamplerCreateInfo::builder()
-            .unnormalized_coordinates(false)
-            .mipmap_mode(SamplerMipmapMode::LINEAR)
-            .mip_lod_bias(0.0)
-            .min_lod(-100.0)
-            .min_filter(Filter::LINEAR)
-            .max_lod(100.0)
-            .max_anisotropy(0.0)
-            .mag_filter(Filter::LINEAR)
-            .compare_op(CompareOp::ALWAYS)
-            .compare_enable(false)
-            .border_color(BorderColor::FLOAT_OPAQUE_WHITE)
-            .anisotropy_enable(false)
-            .address_mode_u(SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(SamplerAddressMode::CLAMP_TO_EDGE);
-
-        unsafe {
-            let sampler = device
-                .create_sampler(&sampler_info, None)
-                .expect("Failed to create sampler for Nuklear texture.");
-            sampler
         }
     }
 
@@ -432,14 +402,24 @@ impl VkTexture {
 }
 
 pub struct Drawer {
-    pub color: Option<Color>,
-    pub(crate) uniform_buffer_layout: DescriptorSetLayout,
+    pub color: Option<[f32; 4]>,
     pub(crate) combined_sampler_layout: DescriptorSetLayout,
-    command_buffer: CommandBuffer,
+    pub(crate) descriptor_pool: DescriptorPool,
+    device: Arc<ash::Device>,
+    command_buffer: NkBuffer,
     vertex_buffer_size: usize,
     index_buffer_size: usize,
     textures: Vec<VkTexture>,
     renderpass: RenderPass,
+    pipeline: Pipeline,
+    pipeline_layout: PipelineLayout,
+    sampler: Sampler,
+    uniform_buffer: VkBuffer,
+    uniform_buffer_layout: DescriptorSetLayout,
+    uniform_buffer_descriptor_set: DescriptorSet,
+    vertex_buffer: VkBuffer,
+    index_buffer: VkBuffer,
+    layout_elements: DrawVertexLayoutElements,
 }
 
 impl Drawer {
@@ -448,53 +428,23 @@ impl Drawer {
         allocator: Option<Allocator>,
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
-        command_buffer: CommandBuffer,
+        command_buffer: NkBuffer,
         color: Option<[f32; 4]>,
         vertex_buffer_size: usize,
         index_buffer_size: usize,
+        texture_count: usize,
     ) -> Self {
-        let vs = include_bytes!("../shaders/vs.fx");
-        let fs = include_bytes!("../shaders/fs.fx");
+        let (vertex_shader, vs_info) =
+            Self::create_shaders(device.as_ref(), "../shaders/vs.fx", ShaderKind::Vertex);
+        let (fragment_shader, fs_info) =
+            Self::create_shaders(device.as_ref(), "../shaders/fs.fx", ShaderKind::Fragment);
+        let shader_infos = vec![vs_info, fs_info];
 
-        let mut compiler = shaderc::Compiler::new().expect("Failed to initialize shader compiler.");
-        let vs_binary = compiler
-            .compile_into_spirv(
-                from_utf8(vs).expect("Failed to read vs bytes into string."),
-                shaderc::ShaderKind::Vertex,
-                "vs.fx",
-                "main",
-                None,
-            )
-            .expect("Failed to compile vertex shader for Nuklear.");
-        let fs_binary = compiler
-            .compile_into_spirv(
-                from_utf8(fs).expect("Failed to read fs bytes into string."),
-                shaderc::ShaderKind::Fragment,
-                "fs.fx",
-                "main",
-                None,
-            )
-            .expect("Failed to compile fragment shader for Nuklear.");
-
-        let vs_info = ShaderModuleCreateInfo::builder().code(vs_binary.as_binary());
-        let fs_info = ShaderModuleCreateInfo::builder().code(fs_binary.as_binary());
-        let vertex_shader = device
-            .create_shader_module(&vs_info, None)
-            .expect("Failed to create vertex shader module.");
-        let fragment_shader = device
-            .create_shader_module(&fs_info, None)
-            .expect("Failed to create fragment shader module.");
-        let ortho: Ortho = [
-            [2.0f32 / width as f32, 0.0f32, 0.0f32, 0.0f32],
-            [0.0f32, -2.0f32 / height as f32, 0.0f32, 0.0f32],
-            [0.0f32, 0.0f32, -1.0f32, 0.0f32],
-            [-1.0f32, 1.0f32, 0.0f32, 1.0f32],
-        ];
         let uniform_buffer = common::create_buffer(
             device.as_ref(),
-            &ortho,
+            &ORTHO,
             std::mem::size_of::<Ortho>() as u64,
-            allocator.as_ref().cloned(),
+            allocator.clone(),
             instance,
             physical_device,
             BufferUsageFlags::UNIFORM_BUFFER,
@@ -502,60 +452,283 @@ impl Drawer {
         );
         let uniform_descriptor_layout = common::create_descriptor_set_layout(
             device.as_ref(),
+            0,
             DescriptorType::UNIFORM_BUFFER,
             ShaderStageFlags::VERTEX,
         );
         let texture_descriptor_layout = common::create_descriptor_set_layout(
             device.as_ref(),
+            1,
             DescriptorType::COMBINED_IMAGE_SAMPLER,
             ShaderStageFlags::FRAGMENT,
         );
-        Ok(())
+        let descriptor_pool = Self::create_descriptor_pool(device.as_ref(), texture_count as u32);
+        let uniform_descriptor_set_layouts = [uniform_descriptor_layout];
+        let uniform_descriptor_set = Self::create_uniform_descriptor_set(
+            device.as_ref(),
+            &uniform_descriptor_set_layouts[0..],
+            descriptor_pool,
+            uniform_buffer.buffer,
+            std::mem::size_of::<Ortho>() as u64,
+        );
+
+        let descriptor_set_layouts = [uniform_descriptor_layout, texture_descriptor_layout];
+        let renderpass = Self::create_renderpass(device.as_ref(), color.clone());
+        let (pipeline, pipeline_layout) = Self::create_graphics_pipeline(
+            device.as_ref(),
+            renderpass,
+            &descriptor_set_layouts[0..],
+            shader_infos.as_slice(),
+        );
+
+        let vertex_data = vec![0_u8; vertex_buffer_size];
+        let vertex_buffer = common::create_buffer(
+            device.as_ref(),
+            vertex_data.as_slice(),
+            vertex_buffer_size as u64,
+            allocator.clone(),
+            instance,
+            physical_device,
+            BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_SRC,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let index_data = vec![0_u8; index_buffer_size];
+        let index_buffer = common::create_buffer(
+            device.as_ref(),
+            index_data.as_slice(),
+            index_buffer_size as u64,
+            allocator.clone(),
+            instance,
+            physical_device,
+            BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_SRC,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        device.destroy_shader_module(vertex_shader, None);
+        device.destroy_shader_module(fragment_shader, None);
+
+        Drawer {
+            color,
+            uniform_buffer_layout: uniform_descriptor_layout,
+            combined_sampler_layout: texture_descriptor_layout,
+            descriptor_pool,
+            device,
+            command_buffer,
+            vertex_buffer_size,
+            index_buffer_size,
+            textures: Vec::with_capacity(texture_count + 1),
+            renderpass,
+            pipeline,
+            pipeline_layout,
+            sampler,
+            uniform_buffer,
+            vertex_buffer,
+            index_buffer,
+            layout_elements: DrawVertexLayoutElements::new(&[
+                (
+                    DrawVertexLayoutAttribute::Position,
+                    DrawVertexLayoutFormat::Float,
+                    0,
+                ),
+                (
+                    DrawVertexLayoutAttribute::TexCoord,
+                    DrawVertexLayoutFormat::Float,
+                    std::mem::size_of::<f32>() as Size * 2,
+                ),
+                (
+                    DrawVertexLayoutAttribute::Color,
+                    DrawVertexLayoutFormat::B8G8R8A8,
+                    std::mem::size_of::<f32>() as Size * 4,
+                ),
+                (
+                    DrawVertexLayoutAttribute::AttributeCount,
+                    DrawVertexLayoutFormat::Count,
+                    0,
+                ),
+            ]),
+            uniform_buffer_descriptor_set: uniform_descriptor_set,
+        }
     }
 
-    fn create_descriptor_set(
-        device: &ash::Device,
-        descriptor_set_layout: DescriptorSetLayout,
-        texture_view: ImageView,
-        sampler: Sampler,
-    ) -> (DescriptorPool, DescriptorSet) {
-        let pool_size = vec![DescriptorPoolSize::builder()
+    pub fn add_texture(
+        &mut self,
+        queue: Queue,
+        image: &[u8],
+        width: u32,
+        height: u32,
+        instance: &ash::Instance,
+        physical_device: PhysicalDevice,
+        command_pool: CommandPool,
+        allocator: Option<Allocator>,
+    ) -> Handle {
+        let device = self.device.clone();
+        self.textures.push(VkTexture::new(
+            device,
+            queue,
+            self,
+            image,
+            width,
+            height,
+            instance,
+            physical_device,
+            command_pool,
+            allocator.clone(),
+        ));
+        Handle::from_id(self.textures.len() as i32)
+    }
+
+    pub fn draw(
+        &mut self,
+        ctx: &mut Context,
+        cfg: &mut ConvertConfig,
+        command_buffer: ash::vk::CommandBuffer,
+        framebuffer: Framebuffer,
+        extent: Extent2D,
+        viewport: Viewport,
+        width: u32,
+        height: u32,
+        scale: Vec2,
+    ) {
+        self.update(cfg);
+        let clear_color = ClearColorValue {
+            float32: self.color.unwrap_or([1.0, 2.0, 3.0, 1.0]),
+        };
+
+        let clear_values = vec![ClearValue { color: clear_color }];
+
+        let renderpass_begin_info = RenderPassBeginInfo::builder()
+            .render_pass(self.renderpass)
+            .framebuffer(framebuffer)
+            .render_area(
+                Rect2D::builder()
+                    .offset(Offset2D::builder().x(0).y(0).build())
+                    .extent(extent)
+                    .build(),
+            )
+            .clear_values(clear_values.as_slice());
+
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                command_buffer,
+                &renderpass_begin_info,
+                SubpassContents::SECONDARY_COMMAND_BUFFERS,
+            );
+            let viewports = [viewport];
+            self.device
+                .cmd_set_viewport(command_buffer, 0, &viewports[0..]);
+            self.device.cmd_bind_pipeline(
+                command_buffer,
+                PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+            let vertex_buffers = [self.vertex_buffer.buffer];
+            let offsets = [0];
+            self.device.cmd_bind_vertex_buffers(
+                command_buffer,
+                0,
+                &vertex_buffers[0..],
+                &offsets[0..],
+            );
+            self.device.cmd_bind_index_buffer(
+                command_buffer,
+                self.index_buffer.buffer,
+                0,
+                IndexType::UINT32,
+            );
+            let uniform_descriptor_sets = [self.uniform_buffer_descriptor_set];
+            self.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &uniform_descriptor_sets[0..],
+                &[],
+            );
+            let mut start = 0;
+            let mut end;
+            for cmd in ctx.draw_command_iterator(&self.command_buffer) {
+                if cmd.elem_count() < 1 {
+                    continue;
+                }
+                let id = cmd.texture().id().expect("Failed to get texture id.");
+                let res = self.find_resource(id);
+                end = start + cmd.elem_count();
+                let sampler_descriptor_sets = [self.com];
+                self.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    1,
+                    &sampler_descriptor_sets[0..],
+                    &[],
+                );
+                let scissors = [Rect2D::builder()
+                    .offset(Offset2D::builder().x(0).y(0).build())
+                    .extent(Extent2D::builder().height(height).width(width).build())];
+                self.device
+                    .cmd_set_scissor(command_buffer, 0, &scissors[0..]);
+            }
+        }
+    }
+
+    fn create_descriptor_pool(device: &ash::Device, texture_count: u32) -> DescriptorPool {
+        let mut pool_sizes = vec![DescriptorPoolSize::builder()
             .descriptor_count(1)
-            .ty(DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .ty(DescriptorType::UNIFORM_BUFFER)
             .build()];
+        pool_sizes.push(
+            DescriptorPoolSize::builder()
+                .descriptor_count(texture_count)
+                .ty(DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .build(),
+        );
         let pool_info = DescriptorPoolCreateInfo::builder()
-            .pool_sizes(pool_size.as_slice())
+            .pool_sizes(pool_sizes.as_slice())
             .max_sets(1)
             .build();
         unsafe {
             let descriptor_pool = device
                 .create_descriptor_pool(&pool_info, None)
                 .expect("Failed to create descriptor pool.");
-            let layouts = vec![descriptor_set_layout];
-            let allocate_info = DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(descriptor_pool)
-                .set_layouts(layouts.as_slice());
+            descriptor_pool
+        }
+    }
+
+    fn create_uniform_descriptor_set(
+        device: &ash::Device,
+        descriptor_set_layout: &[DescriptorSetLayout],
+        descriptor_pool: DescriptorPool,
+        uniform_buffer: ash::vk::Buffer,
+        buffer_range: DeviceSize,
+    ) -> DescriptorSet {
+        let allocate_info = DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(descriptor_set_layout);
+        let descriptor_set: DescriptorSet;
+        unsafe {
             let descriptor_sets = device
                 .allocate_descriptor_sets(&allocate_info)
                 .expect("Failed to create descriptor set.");
+            descriptor_set = descriptor_sets[0];
+        }
+        let buffer_info = vec![DescriptorBufferInfo::builder()
+            .buffer(uniform_buffer)
+            .offset(0)
+            .range(buffer_range)
+            .build()];
 
-            let image_info = vec![DescriptorImageInfo::builder()
-                .image_view(texture_view)
-                .image_layout(ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .sampler(sampler)
-                .build()];
+        let write_descriptor = vec![WriteDescriptorSet::builder()
+            .descriptor_type(DescriptorType::UNIFORM_BUFFER)
+            .buffer_info(buffer_info.as_slice())
+            .dst_array_element(0)
+            .dst_binding(0)
+            .dst_set(descriptor_set)
+            .build()];
 
-            let write_descriptor = vec![WriteDescriptorSet::builder()
-                .descriptor_type(DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(image_info.as_slice())
-                .dst_array_element(0)
-                .dst_binding(0)
-                .dst_set(descriptor_sets[0])
-                .build()];
-
+        unsafe {
             device.update_descriptor_sets(write_descriptor.as_slice(), &[]);
-
-            (descriptor_pool, descriptor_sets[0])
+            descriptor_set
         }
     }
 
@@ -564,7 +737,7 @@ impl Drawer {
         renderpass: RenderPass,
         descriptor_set_layouts: &[DescriptorSetLayout],
         shader_stages: &[PipelineShaderStageCreateInfo],
-    ) -> Pipeline {
+    ) -> (Pipeline, PipelineLayout) {
         let mut vertex_attribute_descriptions = vec![];
         vertex_attribute_descriptions.push(
             VertexInputAttributeDescription::builder()
@@ -668,7 +841,7 @@ impl Drawer {
                 .create_graphics_pipelines(PipelineCache::null(), pipeline_info.as_slice(), None)
                 .expect("Failed to create graphics pipeline.");
 
-            pipeline[0]
+            (pipeline[0], layout)
         }
     }
 
@@ -730,6 +903,109 @@ impl Drawer {
                 .create_render_pass(&renderpass_info, None)
                 .expect("Failed to create renderpass for Nuklear.");
             renderpass
+        }
+    }
+
+    fn create_sampler(device: &ash::Device) -> Sampler {
+        let sampler_info = SamplerCreateInfo::builder()
+            .unnormalized_coordinates(false)
+            .mipmap_mode(SamplerMipmapMode::LINEAR)
+            .mip_lod_bias(0.0)
+            .min_lod(-100.0)
+            .min_filter(Filter::LINEAR)
+            .max_lod(100.0)
+            .max_anisotropy(0.0)
+            .mag_filter(Filter::LINEAR)
+            .compare_op(CompareOp::ALWAYS)
+            .compare_enable(false)
+            .border_color(BorderColor::FLOAT_OPAQUE_WHITE)
+            .anisotropy_enable(false)
+            .address_mode_u(SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_v(SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(SamplerAddressMode::CLAMP_TO_EDGE);
+
+        unsafe {
+            let sampler = device
+                .create_sampler(&sampler_info, None)
+                .expect("Failed to create sampler for Nuklear texture.");
+            sampler
+        }
+    }
+
+    fn create_shaders(
+        device: &ash::Device,
+        file_name: &str,
+        shader_kind: ShaderKind,
+    ) -> (ShaderModule, PipelineShaderStageCreateInfo) {
+        let bytes = include_bytes!(file_name);
+        let mut compiler = shaderc::Compiler::new().expect("Failed to initialize shader compiler.");
+        let binary = compiler
+            .compile_into_spirv(
+                from_utf8(bytes).expect("Failed to read vs bytes into string."),
+                shader_kind,
+                file_name,
+                "main",
+                None,
+            )
+            .expect("Failed to compile vertex shader for Nuklear.");
+        let shader_info = ShaderModuleCreateInfo::builder().code(binary.as_binary());
+        unsafe {
+            let shader = device
+                .create_shader_module(&shader_info, None)
+                .expect("Failed to create vertex shader module.");
+
+            let entry_name =
+                std::ffi::CString::new("main").expect("Failed to create entry name for shaders.");
+
+            let shader_stage_info = PipelineShaderStageCreateInfo::builder()
+                .name(entry_name.as_c_str())
+                .module(shader)
+                .stage(match shader_kind {
+                    ShaderKind::Vertex => ShaderStageFlags::VERTEX,
+                    ShaderKind::Fragment => ShaderStageFlags::FRAGMENT,
+                    _ => ShaderStageFlags::empty(),
+                })
+                .build();
+
+            (shader, shader_stage_info)
+        }
+    }
+
+    fn find_resource(&self, id: i32) -> Option<&VkTexture> {
+        if id > 0 && id as usize <= self.textures.len() {
+            self.textures.get((id - 1) as usize)
+        } else {
+            None
+        }
+    }
+
+    fn update(&mut self, cfg: &mut ConvertConfig) {
+        cfg.set_vertex_layout(&self.layout_elements);
+        cfg.set_vertex_size(std::mem::size_of::<Vertex>() as Size);
+        {
+            let vertex_buffer_mapped = self.vertex_buffer.mapped_memory;
+            let vertex_buffer = unsafe {
+                std::slice::from_raw_parts_mut(
+                    vertex_buffer_mapped as *mut u8,
+                    self.vertex_buffer_size / std::mem::size_of::<Vertex>(),
+                )
+            };
+            let mut vertex_buffer = NkBuffer::with_fixed(vertex_buffer);
+
+            let index_buffer_mapped = self.index_buffer.mapped_memory;
+            let index_buffer = unsafe {
+                std::slice::from_raw_parts_mut(
+                    index_buffer_mapped as *mut u8,
+                    self.index_buffer_size / std::mem::size_of::<u32>(),
+                )
+            };
+            let mut index_buffer = NkBuffer::with_fixed(index_buffer);
+            ctx.convert(
+                &mut self.command_buffer,
+                &mut vertex_buffer,
+                &mut index_buffer,
+                cfg,
+            );
         }
     }
 }
