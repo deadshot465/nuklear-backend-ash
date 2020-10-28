@@ -16,11 +16,12 @@ use std::sync::Arc;
 use vk_mem::Allocator;
 
 struct Vertex {
+    // "Position"
     position: [f32; 2],
-    // "Position",
+    // "TexCoord"
     uv: [f32; 2],
-    // "TexCoord",
-    color: [u8; 4], // "Color",
+    // "Color"
+    color: [f32; 4],
 }
 
 pub struct Drawer {
@@ -58,9 +59,9 @@ impl Drawer {
         texture_count: usize,
     ) -> Self {
         let (vertex_shader, vs_info) =
-            Self::create_shaders(device.as_ref(), "../shaders/vs.fx", ShaderKind::Vertex);
+            Self::create_shaders(device.as_ref(), "../shaders/vs.vert", ShaderKind::Vertex);
         let (fragment_shader, fs_info) =
-            Self::create_shaders(device.as_ref(), "../shaders/fs.fx", ShaderKind::Fragment);
+            Self::create_shaders(device.as_ref(), "../shaders/fs.frag", ShaderKind::Fragment);
         let shader_infos = vec![vs_info, fs_info];
 
         let ortho_size = std::mem::size_of::<Ortho>();
