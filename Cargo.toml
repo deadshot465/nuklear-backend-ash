@@ -2,6 +2,7 @@
 name = "nuklear-backend-ash"
 version = "0.1.0"
 authors = ["Chehui Chou <deadshot465@gmail.com>"]
+keywords = ["gui", "interface", "graphics", "vulkan", "ash"]
 edition = "2018"
 
 [lib]
