@@ -240,7 +240,7 @@ impl Drawer {
             self.device.cmd_begin_render_pass(
                 command_buffer,
                 &renderpass_begin_info,
-                SubpassContents::SECONDARY_COMMAND_BUFFERS,
+                SubpassContents::INLINE,
             );
             let viewports = [viewport];
             self.device
