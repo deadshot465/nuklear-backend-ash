@@ -1,9 +1,11 @@
-use ash::version::DeviceV1_0;
+#![allow(clippy::too_many_arguments, dead_code)]
+use ash::version::{DeviceV1_0, InstanceV1_0};
 use ash::vk::{
     Buffer, BufferCreateInfo, BufferUsageFlags, DescriptorSetLayout, DescriptorSetLayoutBinding,
     DescriptorSetLayoutCreateInfo, DescriptorType, DeviceMemory, MemoryAllocateInfo,
     MemoryMapFlags, MemoryPropertyFlags, PhysicalDevice, ShaderStageFlags, SharingMode,
 };
+use std::sync::Arc;
 use vk_mem::{
     Allocation, AllocationCreateFlags, AllocationCreateInfo, AllocationInfo, Allocator, MemoryUsage,
 };
@@ -20,7 +22,7 @@ pub(crate) fn create_buffer<T>(
     device: &ash::Device,
     data: &[T],
     buffer_size: u64,
-    allocator: Option<Allocator>,
+    allocator: Option<Arc<Allocator>>,
     instance: &ash::Instance,
     physical_device: PhysicalDevice,
     usage_flag: BufferUsageFlags,
@@ -86,7 +88,7 @@ pub(crate) fn create_buffer<T>(
             let memory_requirements = device.get_buffer_memory_requirements(buffer);
             let allocation_info = MemoryAllocateInfo::builder()
                 .allocation_size(memory_requirements.size)
-                .memory_type_index(Self::find_memory_type_index(
+                .memory_type_index(find_memory_type_index(
                     instance,
                     physical_device,
                     memory_requirements.memory_type_bits,
@@ -94,8 +96,10 @@ pub(crate) fn create_buffer<T>(
             let device_memory = device
                 .allocate_memory(&allocation_info, None)
                 .expect("Failed to allocate memory for staging buffer.");
-            device.bind_buffer_memory(buffer, device_memory, 0);
-            let mut mapped = device
+            device
+                .bind_buffer_memory(buffer, device_memory, 0)
+                .expect("Failed to bind buffer memory.");
+            let mapped = device
                 .map_memory(device_memory, 0, buffer_size, MemoryMapFlags::empty())
                 .expect("Failed to map memory for staging buffer.");
             std::ptr::copy_nonoverlapping(
@@ -130,9 +134,27 @@ pub(crate) fn create_descriptor_set_layout(
     let layout_info = DescriptorSetLayoutCreateInfo::builder().bindings(layout_binding.as_slice());
 
     unsafe {
-        let descriptor_set_layout = device
+        device
             .create_descriptor_set_layout(&layout_info, None)
-            .expect("Failed to create descriptor set layout.");
-        descriptor_set_layout
+            .expect("Failed to create descriptor set layout.")
     }
+}
+
+pub(crate) fn find_memory_type_index(
+    instance: &ash::Instance,
+    physical_device: PhysicalDevice,
+    memory_type: u32,
+) -> u32 {
+    unsafe {
+        let properties = instance.get_physical_device_memory_properties(physical_device);
+        let flags = MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT;
+        for i in 0..properties.memory_type_count {
+            if ((memory_type & (1 << i)) != 0)
+                && ((properties.memory_types[i as usize].property_flags & flags) == flags)
+            {
+                return i;
+            }
+        }
+    }
+    0
 }
