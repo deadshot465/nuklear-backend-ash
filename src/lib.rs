@@ -208,6 +208,7 @@ impl Drawer {
 
     pub fn draw(
         &mut self,
+        subpass_contents: SubpassContents,
         ctx: &mut Context,
         cfg: &mut ConvertConfig,
         command_buffer: ash::vk::CommandBuffer,
@@ -240,7 +241,7 @@ impl Drawer {
             self.device.cmd_begin_render_pass(
                 command_buffer,
                 &renderpass_begin_info,
-                SubpassContents::INLINE,
+                subpass_contents,
             );
             let viewports = [viewport];
             self.device
