@@ -58,6 +58,9 @@ impl Drawer {
         vertex_buffer_size: usize,
         index_buffer_size: usize,
         texture_count: usize,
+        color_format: Format,
+        depth_format: Format,
+        sample_count: SampleCountFlags,
     ) -> Self {
         let (vertex_shader, mut vs_info) =
             Self::create_shaders(device.as_ref(), "shaders/vs.vert", ShaderKind::Vertex);
@@ -104,7 +107,13 @@ impl Drawer {
         );
 
         let descriptor_set_layouts = [uniform_descriptor_layout, texture_descriptor_layout];
-        let renderpass = Self::create_renderpass(device.as_ref(), color);
+        let renderpass = Self::create_renderpass(
+            device.as_ref(),
+            color,
+            color_format,
+            depth_format,
+            sample_count,
+        );
         let (pipeline, pipeline_layout) = Self::create_graphics_pipeline(
             device.as_ref(),
             renderpass,
