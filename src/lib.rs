@@ -59,11 +59,15 @@ impl Drawer {
         index_buffer_size: usize,
         texture_count: usize,
     ) -> Self {
-        let (vertex_shader, vs_info) =
+        let (vertex_shader, mut vs_info) =
             Self::create_shaders(device.as_ref(), "shaders/vs.vert", ShaderKind::Vertex);
-        let (fragment_shader, fs_info) =
+        let (fragment_shader, mut fs_info) =
             Self::create_shaders(device.as_ref(), "shaders/fs.frag", ShaderKind::Fragment);
         let shader_infos = vec![vs_info, fs_info];
+        let entry_name =
+            std::ffi::CString::new("main").expect("Failed to create entry name for shaders.");
+        vs_info.p_name = entry_name.as_ptr();
+        fs_info.p_name = entry_name.as_ptr();
 
         let ortho_size = std::mem::size_of::<Ortho>();
         let empty_data = vec![0_u8; ortho_size];
@@ -448,6 +452,13 @@ impl Drawer {
             .attachments(color_attachment.as_slice())
             .logic_op_enable(false);
 
+        let msaa_info = PipelineMultisampleStateCreateInfo::builder()
+            .alpha_to_coverage_enable(false)
+            .alpha_to_one_enable(false)
+            .min_sample_shading(0.0)
+            .rasterization_samples(SampleCountFlags::TYPE_1)
+            .sample_shading_enable(false);
+
         let dynamic_states = [DynamicState::SCISSOR, DynamicState::VIEWPORT];
 
         let dynamic_state_info =
@@ -473,6 +484,7 @@ impl Drawer {
                 .subpass(0)
                 .vertex_input_state(&vi_info)
                 .viewport_state(&vp_info)
+                .multisample_state(&msaa_info)
                 .build()];
 
             let pipeline = device
@@ -590,11 +602,7 @@ impl Drawer {
                 .create_shader_module(&shader_info, None)
                 .expect("Failed to create vertex shader module.");
 
-            let entry_name =
-                std::ffi::CString::new("main").expect("Failed to create entry name for shaders.");
-
             let shader_stage_info = PipelineShaderStageCreateInfo::builder()
-                .name(entry_name.as_c_str())
                 .module(shader)
                 .stage(match shader_kind {
                     ShaderKind::Vertex => ShaderStageFlags::VERTEX,
