@@ -89,7 +89,7 @@ impl Drawer {
         );
         let texture_descriptor_layout = common::create_descriptor_set_layout(
             device.as_ref(),
-            1,
+            0,
             DescriptorType::COMBINED_IMAGE_SAMPLER,
             ShaderStageFlags::FRAGMENT,
         );
@@ -495,11 +495,17 @@ impl Drawer {
         }
     }
 
-    fn create_renderpass(device: &ash::Device, color: Option<[f32; 4]>) -> RenderPass {
-        let color_attachment = vec![AttachmentDescription::builder()
-            .format(TEXTURE_FORMAT)
+    fn create_renderpass(
+        device: &ash::Device,
+        color: Option<[f32; 4]>,
+        color_format: Format,
+        depth_format: Format,
+        sample_count: SampleCountFlags,
+    ) -> RenderPass {
+        let mut attachments = vec![AttachmentDescription::builder()
+            .format(color_format)
             .initial_layout(ImageLayout::UNDEFINED)
-            .samples(SampleCountFlags::TYPE_1)
+            .samples(sample_count)
             .store_op(AttachmentStoreOp::STORE)
             .stencil_store_op(AttachmentStoreOp::DONT_CARE)
             .stencil_load_op(AttachmentLoadOp::DONT_CARE)
@@ -508,17 +514,54 @@ impl Drawer {
             } else {
                 AttachmentLoadOp::LOAD
             })
-            .final_layout(ImageLayout::PRESENT_SRC_KHR)
+            .final_layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .build()];
+
+        attachments.push(
+            AttachmentDescription::builder()
+                .format(depth_format)
+                .initial_layout(ImageLayout::UNDEFINED)
+                .samples(sample_count)
+                .store_op(AttachmentStoreOp::STORE)
+                .stencil_store_op(AttachmentStoreOp::DONT_CARE)
+                .stencil_load_op(AttachmentLoadOp::DONT_CARE)
+                .load_op(AttachmentLoadOp::LOAD)
+                .final_layout(ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .build(),
+        );
+
+        attachments.push(
+            AttachmentDescription::builder()
+                .format(color_format)
+                .initial_layout(ImageLayout::UNDEFINED)
+                .samples(SampleCountFlags::TYPE_1)
+                .store_op(AttachmentStoreOp::STORE)
+                .stencil_store_op(AttachmentStoreOp::DONT_CARE)
+                .stencil_load_op(AttachmentLoadOp::DONT_CARE)
+                .load_op(AttachmentLoadOp::DONT_CARE)
+                .final_layout(ImageLayout::PRESENT_SRC_KHR)
+                .build(),
+        );
 
         let color_reference = vec![AttachmentReference::builder()
             .layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .attachment(0)
             .build()];
 
+        let depth_reference = AttachmentReference::builder()
+            .attachment(1)
+            .layout(ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+        let resolve_reference = vec![AttachmentReference::builder()
+            .attachment(2)
+            .layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .build()];
+
         let subpass_description = vec![SubpassDescription::builder()
             .pipeline_bind_point(PipelineBindPoint::GRAPHICS)
             .color_attachments(color_reference.as_slice())
+            .depth_stencil_attachment(&depth_reference)
+            .resolve_attachments(resolve_reference.as_slice())
             .build()];
 
         let mut subpass_dependencies = vec![SubpassDependency::builder()
@@ -544,7 +587,7 @@ impl Drawer {
         );
 
         let renderpass_info = RenderPassCreateInfo::builder()
-            .attachments(color_attachment.as_slice())
+            .attachments(attachments.as_slice())
             .subpasses(subpass_description.as_slice())
             .dependencies(subpass_dependencies.as_slice());
 
