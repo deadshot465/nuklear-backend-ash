@@ -2,6 +2,7 @@
 use crate::{common, Drawer};
 use ash::version::DeviceV1_0;
 use ash::vk::*;
+use crossbeam::sync::ShardedLock;
 use std::sync::Arc;
 use vk_mem::{
     Allocation, AllocationCreateFlags, AllocationCreateInfo, AllocationInfo, Allocator, MemoryUsage,
@@ -25,7 +26,7 @@ pub(crate) struct VkImage {
 pub(crate) type Ortho = [[f32; 4]; 4];
 
 impl VkTexture {
-    pub fn new<'a>(
+    pub fn new(
         device: Arc<ash::Device>,
         graphics_queue: Queue,
         drawer: &Drawer,
@@ -35,7 +36,7 @@ impl VkTexture {
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
         command_pool: CommandPool,
-        allocator: Option<&'a Allocator>,
+        allocator: Option<Arc<ShardedLock<Allocator>>>,
     ) -> Self {
         let mut texture = Self::create_texture(
             device.as_ref(),
@@ -75,8 +76,10 @@ impl VkTexture {
         );
 
         unsafe {
-            if let Some(allocator_reference) = allocator.as_ref() {
-                allocator_reference
+            if let Some(allocator) = allocator.as_ref() {
+                allocator
+                    .read()
+                    .expect("Failed to lock allocator.")
                     .destroy_buffer(
                         staging_buffer.buffer,
                         staging_buffer.allocation.as_ref().unwrap(),
@@ -285,11 +288,11 @@ impl VkTexture {
         }
     }
 
-    fn create_texture<'a>(
+    fn create_texture(
         device: &ash::Device,
         height: u32,
         width: u32,
-        allocator: Option<&'a Allocator>,
+        allocator: Option<Arc<ShardedLock<Allocator>>>,
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
     ) -> VkImage {
@@ -323,6 +326,8 @@ impl VkTexture {
             };
 
             let (texture, allocation, allocation_info) = allocator
+                .read()
+                .expect("Failed to lock allocator.")
                 .create_image(&image_info, &allocation_info)
                 .expect("Failed to create texture for Nuklear.");
             VkImage {

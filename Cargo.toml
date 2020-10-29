@@ -11,6 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 ash = ">=0.31.0"
+crossbeam = "0.8.0"
 log = ">=0.3"
 memoffset = ">=0.6.1"
 nuklear-rust = ">=0.6.3"

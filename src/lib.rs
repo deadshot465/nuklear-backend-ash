@@ -6,6 +6,7 @@ pub(crate) use vk_texture::*;
 use ash::version::DeviceV1_0;
 use ash::vk::*;
 use common::*;
+use crossbeam::sync::ShardedLock;
 use nuklear::{
     Buffer as NkBuffer, Context, ConvertConfig, DrawVertexLayoutAttribute,
     DrawVertexLayoutElements, DrawVertexLayoutFormat, Handle, Size, Vec2,
@@ -24,13 +25,13 @@ struct Vertex {
     color: [f32; 4],
 }
 
-pub struct Drawer<'a> {
+pub struct Drawer {
     pub color: Option<[f32; 4]>,
     pub(crate) combined_sampler_layout: DescriptorSetLayout,
     pub(crate) descriptor_pool: DescriptorPool,
     pub(crate) sampler: Sampler,
     device: Arc<ash::Device>,
-    allocator: Option<&'a Allocator>,
+    allocator: Option<Arc<ShardedLock<Allocator>>>,
     command_buffer: NkBuffer,
     vertex_buffer_size: usize,
     index_buffer_size: usize,
@@ -46,10 +47,10 @@ pub struct Drawer<'a> {
     layout_elements: DrawVertexLayoutElements,
 }
 
-impl<'a> Drawer<'a> {
+impl Drawer {
     pub unsafe fn new(
         device: Arc<ash::Device>,
-        allocator: Option<&'a Allocator>,
+        allocator: Option<Arc<ShardedLock<Allocator>>>,
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
         command_buffer: NkBuffer,
@@ -188,7 +189,7 @@ impl<'a> Drawer<'a> {
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
         command_pool: CommandPool,
-        allocator: Option<&'a Allocator>,
+        allocator: Option<Arc<ShardedLock<Allocator>>>,
     ) -> Handle {
         let device = self.device.clone();
         self.textures.push(VkTexture::new(
@@ -660,7 +661,7 @@ impl<'a> Drawer<'a> {
     }
 }
 
-impl<'a> Drop for Drawer<'a> {
+impl Drop for Drawer {
     fn drop(&mut self) {
         let device = &self.device;
         for texture in self.textures.iter() {
@@ -674,6 +675,8 @@ impl<'a> Drop for Drawer<'a> {
                     .as_ref()
                     .expect("Failed to get allocation of image.");
                 allocator
+                    .read()
+                    .expect("Failed to lock allocator.")
                     .destroy_image(texture.image.image, allocation)
                     .expect("Failed to destroy image.");
             } else {
@@ -699,6 +702,8 @@ impl<'a> Drop for Drawer<'a> {
                 .as_ref()
                 .expect("Failed to get allocation for uniform buffer.");
             allocator
+                .read()
+                .expect("Failed to lock allocator.")
                 .destroy_buffer(self.uniform_buffer.buffer, allocation)
                 .expect("Failed to destroy uniform buffer.");
             let allocation = self
@@ -707,6 +712,8 @@ impl<'a> Drop for Drawer<'a> {
                 .as_ref()
                 .expect("Failed to get allocation for index buffer.");
             allocator
+                .read()
+                .expect("Failed to lock allocator.")
                 .destroy_buffer(self.index_buffer.buffer, allocation)
                 .expect("Failed to destroy index buffer.");
             let allocation = self
@@ -715,6 +722,8 @@ impl<'a> Drop for Drawer<'a> {
                 .as_ref()
                 .expect("Failed to get allocation for vertex buffer.");
             allocator
+                .read()
+                .expect("Failed to lock allocator.")
                 .destroy_buffer(self.vertex_buffer.buffer, allocation)
                 .expect("Failed to destroy vertex buffer.");
         } else {

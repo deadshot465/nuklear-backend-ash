@@ -5,6 +5,8 @@ use ash::vk::{
     DescriptorSetLayoutCreateInfo, DescriptorType, DeviceMemory, MemoryAllocateInfo,
     MemoryMapFlags, MemoryPropertyFlags, PhysicalDevice, ShaderStageFlags, SharingMode,
 };
+use crossbeam::sync::ShardedLock;
+use std::sync::Arc;
 use vk_mem::{
     Allocation, AllocationCreateFlags, AllocationCreateInfo, AllocationInfo, Allocator, MemoryUsage,
 };
@@ -17,11 +19,11 @@ pub(crate) struct VkBuffer {
     pub(crate) allocation_info: Option<AllocationInfo>,
 }
 
-pub(crate) fn create_buffer<'a, T>(
+pub(crate) fn create_buffer<T>(
     device: &ash::Device,
     data: &[T],
     buffer_size: u64,
-    allocator: Option<&'a Allocator>,
+    allocator: Option<Arc<ShardedLock<Allocator>>>,
     instance: &ash::Instance,
     physical_device: PhysicalDevice,
     usage_flag: BufferUsageFlags,
@@ -61,6 +63,8 @@ pub(crate) fn create_buffer<'a, T>(
         };
 
         let (buffer, allocation, allocation_info) = allocator
+            .read()
+            .expect("Failed to lock allocator.")
             .create_buffer(&buffer_info, &allocation_info)
             .expect("Failed to create staging buffer for Nuklear texture.");
         let device_memory = allocation_info.get_device_memory();
