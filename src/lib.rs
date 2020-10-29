@@ -328,7 +328,7 @@ impl Drawer {
         );
         let pool_info = DescriptorPoolCreateInfo::builder()
             .pool_sizes(pool_sizes.as_slice())
-            .max_sets(1)
+            .max_sets(1 + texture_count)
             .build();
         unsafe {
             device
