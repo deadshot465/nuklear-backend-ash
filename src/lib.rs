@@ -119,6 +119,7 @@ impl Drawer {
             renderpass,
             &descriptor_set_layouts[0..],
             shader_infos.as_slice(),
+            sample_count,
         );
 
         let vertex_data = vec![0_u8; vertex_buffer_size];
@@ -388,6 +389,7 @@ impl Drawer {
         renderpass: RenderPass,
         descriptor_set_layouts: &[DescriptorSetLayout],
         shader_stages: &[PipelineShaderStageCreateInfo],
+        sample_count: SampleCountFlags,
     ) -> (Pipeline, PipelineLayout) {
         let mut vertex_attribute_descriptions = vec![];
         vertex_attribute_descriptions.push(
@@ -461,11 +463,18 @@ impl Drawer {
             .attachments(color_attachment.as_slice())
             .logic_op_enable(false);
 
+        let depth_info = PipelineDepthStencilStateCreateInfo::builder()
+            .depth_bounds_test_enable(false)
+            .depth_compare_op(CompareOp::LESS)
+            .depth_test_enable(false)
+            .depth_write_enable(true)
+            .stencil_test_enable(false);
+
         let msaa_info = PipelineMultisampleStateCreateInfo::builder()
             .alpha_to_coverage_enable(false)
             .alpha_to_one_enable(false)
-            .min_sample_shading(0.0)
-            .rasterization_samples(SampleCountFlags::TYPE_1)
+            .min_sample_shading(0.25)
+            .rasterization_samples(sample_count)
             .sample_shading_enable(false);
 
         let dynamic_states = [DynamicState::SCISSOR, DynamicState::VIEWPORT];
@@ -494,6 +503,7 @@ impl Drawer {
                 .vertex_input_state(&vi_info)
                 .viewport_state(&vp_info)
                 .multisample_state(&msaa_info)
+                .depth_stencil_state(&depth_info)
                 .build()];
 
             let pipeline = device
