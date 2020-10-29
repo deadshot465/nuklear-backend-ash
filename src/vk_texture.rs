@@ -248,7 +248,7 @@ impl VkTexture {
                 .descriptor_type(DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .image_info(image_info.as_slice())
                 .dst_array_element(0)
-                .dst_binding(1)
+                .dst_binding(0)
                 .dst_set(descriptor_sets[0])
                 .build()];
 
