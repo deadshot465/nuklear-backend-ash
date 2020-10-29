@@ -60,9 +60,9 @@ impl Drawer {
         texture_count: usize,
     ) -> Self {
         let (vertex_shader, vs_info) =
-            Self::create_shaders(device.as_ref(), "../shaders/vs.vert", ShaderKind::Vertex);
+            Self::create_shaders(device.as_ref(), "shaders/vs.vert", ShaderKind::Vertex);
         let (fragment_shader, fs_info) =
-            Self::create_shaders(device.as_ref(), "../shaders/fs.frag", ShaderKind::Fragment);
+            Self::create_shaders(device.as_ref(), "shaders/fs.frag", ShaderKind::Fragment);
         let shader_infos = vec![vs_info, fs_info];
 
         let ortho_size = std::mem::size_of::<Ortho>();
