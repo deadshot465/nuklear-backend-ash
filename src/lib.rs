@@ -307,6 +307,7 @@ impl Drawer {
                     .cmd_draw_indexed(command_buffer, cmd.elem_count(), 1, start, 0, 0);
                 start += cmd.elem_count();
             }
+            self.device.cmd_end_render_pass(command_buffer);
         }
     }
 
