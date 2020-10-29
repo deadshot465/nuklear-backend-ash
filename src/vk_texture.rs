@@ -25,7 +25,7 @@ pub(crate) struct VkImage {
 pub(crate) type Ortho = [[f32; 4]; 4];
 
 impl VkTexture {
-    pub fn new(
+    pub fn new<'a>(
         device: Arc<ash::Device>,
         graphics_queue: Queue,
         drawer: &Drawer,
@@ -35,7 +35,7 @@ impl VkTexture {
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
         command_pool: CommandPool,
-        allocator: Option<Arc<Allocator>>,
+        allocator: Option<&'a Allocator>,
     ) -> Self {
         let mut texture = Self::create_texture(
             device.as_ref(),
@@ -285,11 +285,11 @@ impl VkTexture {
         }
     }
 
-    fn create_texture(
+    fn create_texture<'a>(
         device: &ash::Device,
         height: u32,
         width: u32,
-        allocator: Option<Arc<Allocator>>,
+        allocator: Option<&'a Allocator>,
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
     ) -> VkImage {

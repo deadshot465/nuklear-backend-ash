@@ -24,13 +24,13 @@ struct Vertex {
     color: [f32; 4],
 }
 
-pub struct Drawer {
+pub struct Drawer<'a> {
     pub color: Option<[f32; 4]>,
     pub(crate) combined_sampler_layout: DescriptorSetLayout,
     pub(crate) descriptor_pool: DescriptorPool,
     pub(crate) sampler: Sampler,
     device: Arc<ash::Device>,
-    allocator: Option<Arc<Allocator>>,
+    allocator: Option<&'a Allocator>,
     command_buffer: NkBuffer,
     vertex_buffer_size: usize,
     index_buffer_size: usize,
@@ -46,10 +46,10 @@ pub struct Drawer {
     layout_elements: DrawVertexLayoutElements,
 }
 
-impl Drawer {
+impl<'a> Drawer<'a> {
     pub unsafe fn new(
         device: Arc<ash::Device>,
-        allocator: Option<Arc<Allocator>>,
+        allocator: Option<&'a Allocator>,
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
         command_buffer: NkBuffer,
@@ -188,7 +188,7 @@ impl Drawer {
         instance: &ash::Instance,
         physical_device: PhysicalDevice,
         command_pool: CommandPool,
-        allocator: Option<Arc<Allocator>>,
+        allocator: Option<&'a Allocator>,
     ) -> Handle {
         let device = self.device.clone();
         self.textures.push(VkTexture::new(
@@ -660,7 +660,7 @@ impl Drawer {
     }
 }
 
-impl Drop for Drawer {
+impl<'a> Drop for Drawer<'a> {
     fn drop(&mut self) {
         let device = &self.device;
         for texture in self.textures.iter() {

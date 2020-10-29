@@ -5,7 +5,6 @@ use ash::vk::{
     DescriptorSetLayoutCreateInfo, DescriptorType, DeviceMemory, MemoryAllocateInfo,
     MemoryMapFlags, MemoryPropertyFlags, PhysicalDevice, ShaderStageFlags, SharingMode,
 };
-use std::sync::Arc;
 use vk_mem::{
     Allocation, AllocationCreateFlags, AllocationCreateInfo, AllocationInfo, Allocator, MemoryUsage,
 };
@@ -18,11 +17,11 @@ pub(crate) struct VkBuffer {
     pub(crate) allocation_info: Option<AllocationInfo>,
 }
 
-pub(crate) fn create_buffer<T>(
+pub(crate) fn create_buffer<'a, T>(
     device: &ash::Device,
     data: &[T],
     buffer_size: u64,
-    allocator: Option<Arc<Allocator>>,
+    allocator: Option<&'a Allocator>,
     instance: &ash::Instance,
     physical_device: PhysicalDevice,
     usage_flag: BufferUsageFlags,
