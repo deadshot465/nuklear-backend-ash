@@ -63,11 +63,11 @@ impl Drawer {
             Self::create_shaders(device.as_ref(), "shaders/vs.vert", ShaderKind::Vertex);
         let (fragment_shader, mut fs_info) =
             Self::create_shaders(device.as_ref(), "shaders/fs.frag", ShaderKind::Fragment);
-        let shader_infos = vec![vs_info, fs_info];
         let entry_name =
             std::ffi::CString::new("main").expect("Failed to create entry name for shaders.");
         vs_info.p_name = entry_name.as_ptr();
         fs_info.p_name = entry_name.as_ptr();
+        let shader_infos = vec![vs_info, fs_info];
 
         let ortho_size = std::mem::size_of::<Ortho>();
         let empty_data = vec![0_u8; ortho_size];
