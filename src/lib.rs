@@ -544,7 +544,7 @@ impl Drawer {
                 .store_op(AttachmentStoreOp::STORE)
                 .stencil_store_op(AttachmentStoreOp::DONT_CARE)
                 .stencil_load_op(AttachmentLoadOp::DONT_CARE)
-                .load_op(AttachmentLoadOp::LOAD)
+                .load_op(AttachmentLoadOp::DONT_CARE)
                 .final_layout(ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
                 .build(),
         );
