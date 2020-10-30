@@ -223,41 +223,17 @@ impl Drawer {
 
     pub fn draw(
         &mut self,
-        subpass_contents: SubpassContents,
         ctx: &mut Context,
         cfg: &mut ConvertConfig,
         command_buffer: ash::vk::CommandBuffer,
-        framebuffer: Framebuffer,
-        extent: Extent2D,
         viewport: Viewport,
         width: u32,
         height: u32,
         scale: Vec2,
     ) {
         self.update(ctx, cfg, width, height);
-        let clear_color = ClearColorValue {
-            float32: self.color.unwrap_or([1.0, 2.0, 3.0, 1.0]),
-        };
-
-        let clear_values = vec![ClearValue { color: clear_color }];
-
-        let renderpass_begin_info = RenderPassBeginInfo::builder()
-            .render_pass(self.renderpass)
-            .framebuffer(framebuffer)
-            .render_area(
-                Rect2D::builder()
-                    .offset(Offset2D::builder().x(0).y(0).build())
-                    .extent(extent)
-                    .build(),
-            )
-            .clear_values(clear_values.as_slice());
 
         unsafe {
-            self.device.cmd_begin_render_pass(
-                command_buffer,
-                &renderpass_begin_info,
-                subpass_contents,
-            );
             let viewports = [viewport];
             self.device
                 .cmd_set_viewport(command_buffer, 0, &viewports[0..]);
@@ -321,7 +297,6 @@ impl Drawer {
                     .cmd_draw_indexed(command_buffer, cmd.elem_count(), 1, start, 0, 0);
                 start += cmd.elem_count();
             }
-            self.device.cmd_end_render_pass(command_buffer);
         }
     }
 
