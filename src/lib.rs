@@ -226,7 +226,6 @@ impl Drawer {
         ctx: &mut Context,
         cfg: &mut ConvertConfig,
         command_buffer: ash::vk::CommandBuffer,
-        viewport: Viewport,
         width: u32,
         height: u32,
         scale: Vec2,
@@ -234,9 +233,6 @@ impl Drawer {
         self.update(ctx, cfg, width, height);
 
         unsafe {
-            let viewports = [viewport];
-            self.device
-                .cmd_set_viewport(command_buffer, 0, &viewports[0..]);
             self.device.cmd_bind_pipeline(
                 command_buffer,
                 PipelineBindPoint::GRAPHICS,
